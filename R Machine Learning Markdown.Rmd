@@ -1,0 +1,153 @@
+---
+title: "Machine Learning Learning Project Markdown"
+author: "James Shepherd"
+date: "September 26, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction  
+This project finds an algorithm that can correctly identify whether barbell lifts are being done correctly based on accelerometer data from the belt, forearm, arm, dumbell of 6 participants. The data for this was obtained from http://groupware.les.inf.puc-rio.br/har  
+  
+# Loading the Data  
+```{r, cache = TRUE}  
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "training.csv")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "testing.csv")
+training <- read.csv("training.csv", header = TRUE)
+testing <- read.csv("testing.csv", header = TRUE)  
+```  
+This code sets the working directory, downloads that data, and then reads that data into R  
+  
+```{r, cache = TRUE}  
+library(caret)
+library(rattle)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(randomForest)
+library(AppliedPredictiveModeling)
+library(pgmm)
+library(gbm)
+library(e1071)
+```   
+  
+This loads all the packages that might be used for this project  
+  
+```{r}  
+set.seed(250)  
+```  
+The seed is set to ensure reproducibility  
+  
+# Partioning the Training Data Set 
+Splits the data into a 75% training set and a 25% testing set  
+```{r, cache = TRUE}
+inTrain <- createDataPartition(y=training$classe, p = 0.75, list = FALSE)
+training2 <- training[inTrain, ]
+testing2 <- training[-inTrain, ]
+``` 
+  
+# Exploring the Data  
+Having a look at the data to determine its structure, cleaning that may be required etc. These commands are not evaluated in the HTML due to the large amount of output they generate.    
+  
+```{r, eval = FALSE}
+str(training2)
+head(training2)
+summary(training2)
+```
+
+# Cleaning the Data  
+This removes columns 2 through 8 (as they are not useful for predicting), removes columns that are full of NAs, and ensure that only columns in the final testing set are  present in the training & test sets  
+  
+```{r, cache = TRUE}
+variables <- names(testing[,colSums(is.na(testing)) == 0])[8:59]
+training2 <- training2[,c(variables, "classe")]
+testing2 <- testing2[,c(variables, "classe")]
+testing <- testing[,c(variables, "problem_id")]
+```
+  
+# Training and Predicting Using Various Models  
+Here, 5 different models will be trained to ensure prediction accuracy, either through selection of the best model or, if the best model is still not accurate enough, a combination model may be used instead. The following models are trained - a Regression Tree (rpart), a Linear Discriminant Model (lda), a Support Vector Machine (svm), a Random Forest model (rf), and a Generalised Boosted Regression model (gbm). Predictions on the training set are then driven from each model    
+  
+```{r, cache = TRUE, results = "hide", message = FALSE}
+rpart <- train(classe~., method = "rpart", data = training2)
+lda <- train(classe~., method = "lda", data = training2)
+svm <- svm(classe~., data = training2)
+rf <- train(classe~., method = "rf", data = training2)
+gbm <- train(classe~., method = "gbm", data = training2)
+  
+pred_rpart <- predict(rpart, training2)
+pred_lda <- predict(lda, training2)
+pred_svm <- predict(svm, training2)
+pred_rf <- predict(rf, training2)
+pred_gbm <- predict(gbm, training2)
+```  
+  
+# Checking Model Fits  
+Each model will be checked for its accuracy in prediction on the training dataset to discover the in-sample accuracy  
+  
+```{r, cache = TRUE} 
+fit_rpart <- confusionMatrix(pred_rpart, training2$classe)$overall
+fit_lda <- confusionMatrix(pred_lda, training2$classe)$overall
+fit_svm <- confusionMatrix(pred_svm, training2$classe)$overall
+fit_rf <- confusionMatrix(pred_rf, training2$classe)$overall
+fit_gbm <- confusionMatrix(pred_gbm, training2$classe)$overall
+```
+  
+Now to check the fits for each model  
+```{r, cache = TRUE}
+fit_rpart # 49.6%
+fit_lda # 70.8%
+fit_svm # 95.1%
+fit_rf # 100.0%
+fit_gbm # 97.3%
+```
+  
+So we can see that the Random Forest model is the most accurate, with a 100.00% accuracy 
+  
+# Out of Sample Error  
+Now each model is checked against the testing2 dataset to find the best one for predicting on unseen data. In addition, a combination of all 5 models in trained and tested  
+  
+```{r, cache = TRUE}
+pred_rpart_test <- predict(rpart, testing2)
+pred_lda_test <- predict(lda, testing2)
+pred_svm_test <- predict(svm, testing2)
+pred_rf_test <- predict(rf, testing2)
+pred_gbm_test <- predict(gbm, testing2)
+```
+  
+```{r, cache = TRUE}
+pred_DF_test <- data.frame(pred_rpart_test, pred_lda_test, pred_svm_test, pred_rf_test, pred_gbm_test, classe = testing2$classe)
+combo_test <- train(classe~., method = "rf", data = pred_DF_test)
+pred_combo_test <- predict(combo_test, testing2)
+  
+fit_rpart_test <- confusionMatrix(pred_rpart_test, testing2$classe)$overall
+fit_lda_test <- confusionMatrix(pred_lda_test, testing2$classe)$overall
+fit_svm_test <- confusionMatrix(pred_svm_test, testing2$classe)$overall
+fit_rf_test <- confusionMatrix(pred_rf_test, testing2$classe)$overall
+fit_gbm_test <- confusionMatrix(pred_gbm_test, testing2$classe)$overall
+fit_combo_test <- confusionMatrix(pred_combo_test, testing2$classe)$overall
+  
+fit_rpart_test # 49.3%
+fit_lda_test # 69.2%
+fit_svm_test # 94.5%
+fit_rf_test # 99.3%
+fit_gbm_test # 95.9%
+fit_combo_test # 99.3%
+```
+  
+The out of sample errors are all very comparable to the within sample errors. The random forest model will be used on the Coursera test cases as it has effectively the same accuracy as the combination of all 5 models (difference of only 0.04%).  
+  
+# Running the Model on the 20 Test Cases  
+  
+```{r, cache = TRUE}
+predict(rf, testing) # B A B A A E D B A A B C B A E E A B B B - All answers correct in the quiz  
+```
+  
+# Conclusion  
+  
+The Random Forest model proved to be superior for both in-sample and out of sample error (for out of sample error, it was negligibly less accurate than a combination of all 5 models). On testing against the 20 Coursera test cases, the random forest model got all of them correct. Earlier on, principal component analysis (PCA) or other similar techniques could have been used to decrease the number of features in the models. However, as adequate computing power was available and out of sample accuracy was so close to in-sample accuracy, this step was considered to be unnecessary. 
+
+
